@@ -1,0 +1,611 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>منصة الرسم الذكي والتفاعلي - الإصدار الزجاجي</title>
+    
+    <!-- خط القاهرة للتصاميم الاحترافية -->
+    <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@300;400;700;900&display=swap" rel="stylesheet">
+    
+    <!-- مكتبات MediaPipe للتعرف على حركات اليد والكاميرا -->
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+
+    <style>
+        :root {
+            --color-primary: #00f3ff; 
+            --color-secondary: #ff007f; 
+            --color-tertiary: #ffeb3b; 
+            --glass-bg: rgba(10, 15, 30, 0.45);
+            --glass-border: rgba(255, 255, 255, 0.08);
+            --glass-glow: rgba(0, 243, 255, 0.15);
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            font-family: 'Cairo', sans-serif;
+            user-select: none;
+        }
+
+        body {
+            overflow: hidden;
+            background: radial-gradient(circle at center, #141b2d 0%, #080b11 100%);
+            height: 100vh;
+            width: 100vw;
+            color: #f8fafc;
+        }
+
+        #container {
+            position: relative;
+            width: 100%;
+            height: 100%;
+        }
+
+        /* تغذية الفيديو */
+        video {
+            position: absolute;
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            transform: scaleX(-1);
+            opacity: 0.35;
+            z-index: 1;
+            pointer-events: none;
+        }
+
+        /* لوحة الرسم الأساسية */
+        #paintCanvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 2;
+            transform: scaleX(-1);
+        }
+
+        /* تأثير الـ Glassify الفاخر لأشرطة الأدوات */
+        .glass-panel {
+            background: var(--glass-bg);
+            backdrop-filter: blur(30px) saturate(190%);
+            -webkit-backdrop-filter: blur(30px) saturate(190%);
+            border: 1px solid var(--glass-border);
+            border-radius: 24px;
+            box-shadow: 
+                0 4px 30px rgba(0, 0, 0, 0.4),
+                inset 0 1px 1px rgba(255, 255, 255, 0.1),
+                0 0 40px var(--glass-glow);
+            transition: all 0.5s cubic-bezier(0.19, 1, 0.22, 1);
+        }
+
+        /* شريط الأدوات العلوي */
+        .toolbar {
+            position: absolute;
+            left: 50%;
+            transform: translateX(-50%);
+            width: auto;
+            min-width: 480px;
+            padding: 14px 28px;
+            z-index: 10;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            opacity: 0;
+        }
+
+        #top-toolbar {
+            top: -120px;
+        }
+
+        #bottom-toolbar {
+            bottom: -120px;
+        }
+
+        /* حالات التفاعل لظهور القوائم */
+        .toolbar.visible {
+            opacity: 1;
+        }
+        #top-toolbar.visible {
+            top: 24px;
+        }
+        #bottom-toolbar.visible {
+            bottom: 24px;
+        }
+
+        /* تنسيقات البيانات التفاعلية */
+        .info-group {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .status-badge {
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            padding: 6px 14px;
+            border-radius: 14px;
+            font-size: 13px;
+            font-weight: 600;
+            text-shadow: 0 2px 4px rgba(0,0,0,0.5);
+        }
+
+        .color-dot {
+            width: 18px;
+            height: 18px;
+            border-radius: 50%;
+            box-shadow: 0 0 10px currentColor;
+        }
+
+        /* لوحة الـ HUD الدائرية المرافقة لحركة اليد */
+        #hud-ring {
+            position: absolute;
+            width: 90px;
+            height: 90px;
+            border-radius: 50%;
+            border: 2px solid var(--color-primary);
+            pointer-events: none;
+            z-index: 12;
+            transform: translate(-50%, -50%) scale(0);
+            transition: transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1), border-color 0.3s;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: rgba(5, 8, 16, 0.7);
+            backdrop-filter: blur(5px);
+            box-shadow: 0 0 25px var(--color-primary);
+        }
+
+        #hud-text {
+            font-size: 11px;
+            font-weight: 700;
+            letter-spacing: 0.5px;
+            text-transform: uppercase;
+        }
+
+        /* نافذة الإيموجي الزجاجية المنبثقة التفاعلية */
+        #emoji-popup {
+            position: absolute;
+            z-index: 15;
+            padding: 16px;
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 12px;
+            transform: scale(0);
+            transform-origin: center;
+            transition: transform 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
+            pointer-events: auto;
+        }
+
+        #emoji-popup.active {
+            transform: scale(1);
+        }
+
+        .emoji-item {
+            font-size: 28px;
+            cursor: pointer;
+            width: 50px;
+            height: 50px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 12px;
+            background: rgba(255, 255, 255, 0.03);
+            border: 1px solid rgba(255, 255, 255, 0.05);
+            transition: all 0.2s ease;
+        }
+
+        .emoji-item:hover, .emoji-item.selected {
+            background: rgba(255, 255, 255, 0.15);
+            transform: scale(1.15);
+            box-shadow: 0 0 15px rgba(255,255,255,0.2);
+        }
+
+        /* فلاش التقاط الشاشة */
+        #flash-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: #fff;
+            opacity: 0;
+            z-index: 100;
+            pointer-events: none;
+            transition: opacity 0.1s ease-out;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="container">
+        <!-- شاشة فلاش الكاميرا عند لقطة الشاشة -->
+        <div id="flash-overlay"></div>
+
+        <video id="webcam" autoplay playsinline></video>
+        <canvas id="paintCanvas"></canvas>
+
+        <!-- لوحة الـ HUD الدائرية -->
+        <div id="hud-ring">
+            <span id="hud-text">مستعد</span>
+        </div>
+
+        <!-- قائمة اختيار الرموز التعبيرية (تظهر وتختفي عند حركة 🫰) -->
+        <div id="emoji-popup" class="glass-panel">
+            <div class="emoji-item" onclick="selectEmoji('❤️')">❤️</div>
+            <div class="emoji-item" onclick="selectEmoji('🔥')">🔥</div>
+            <div class="emoji-item" onclick="selectEmoji('✨')">✨</div>
+            <div class="emoji-item" onclick="selectEmoji('🎉')">🎉</div>
+            <div class="emoji-item" onclick="selectEmoji('🚀')">🚀</div>
+            <div class="emoji-item" onclick="selectEmoji('👍')">👍</div>
+            <div class="emoji-item" onclick="selectEmoji('💡')">💡</div>
+            <div class="emoji-item" onclick="selectEmoji('🎨')">🎨</div>
+        </div>
+
+        <!-- أشرطة الأدوات الذكية الزجاجية -->
+        <div id="top-toolbar" class="toolbar glass-panel">
+            <div class="info-group">
+                <span>اللون:</span>
+                <div id="active-color-dot" class="color-dot" style="background-color: var(--color-primary); color: var(--color-primary);"></div>
+            </div>
+            <div class="info-group">
+                <span>النمط:</span>
+                <span id="active-mode" class="status-badge">انتظار</span>
+            </div>
+        </div>
+
+        <div id="bottom-toolbar" class="toolbar glass-panel">
+            <div class="info-group">
+                <span>الحجم:</span>
+                <span id="brush-size-text" class="status-badge">12px</span>
+            </div>
+            <div class="info-group">
+                <span>رمز نشط:</span>
+                <span id="active-emoji" class="status-badge">لاشيء</span>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const videoElement = document.getElementById('webcam');
+        const canvasElement = document.getElementById('paintCanvas');
+        const canvasCtx = canvasElement.getContext('2d');
+        
+        const hudRing = document.getElementById('hud-ring');
+        const hudText = document.getElementById('hud-text');
+        const topToolbar = document.getElementById('top-toolbar');
+        const bottomToolbar = document.getElementById('bottom-toolbar');
+        const emojiPopup = document.getElementById('emoji-popup');
+        const flashOverlay = document.getElementById('flash-overlay');
+        
+        const activeColorDot = document.getElementById('active-color-dot');
+        const activeModeText = document.getElementById('active-mode');
+        const brushSizeText = document.getElementById('brush-size-text');
+        const activeEmojiText = document.getElementById('active-emoji');
+
+        // إعدادات الحالة والتفاعل
+        let brushColor = '#00f3ff'; 
+        let brushSize = 12;
+        let isDrawing = false;
+        
+        let lastX = 0;
+        let lastY = 0;
+
+        // حالة قائمة الإيموجي والرموز النشطة
+        let isEmojiMenuOpen = false;
+        let selectedEmoji = '';
+        let heartGestureCooldown = false;
+
+        // متغيرات تتبع الكف المفتوح المزدوج (Double Flash/Pulse)
+        let lastFlashTime = 0;
+        let flashCounter = 0;
+        let wasHandFullyOpen = false;
+
+        // مصفوفة كشف الاهتزاز السريع للمسح الكلي
+        let xHistory = [];
+        const shakeThreshold = 0.09;
+
+        function resizeCanvas() {
+            canvasElement.width = window.innerWidth;
+            canvasElement.height = window.innerHeight;
+        }
+        window.addEventListener('resize', resizeCanvas);
+        resizeCanvas();
+
+        function triggerHUD(text, color, scale = 1.15) {
+            hudRing.style.borderColor = color;
+            hudRing.style.boxShadow = `0 0 25px ${color}`;
+            hudText.innerText = text;
+            hudRing.style.transform = `translate(-50%, -50%) scale(${scale})`;
+            
+            clearTimeout(hudRing.timeout);
+            hudRing.timeout = setTimeout(() => {
+                hudRing.style.transform = 'translate(-50%, -50%) scale(0)';
+            }, 900);
+        }
+
+        function updateToolbarVisibility(y) {
+            if (y < 0.16) topToolbar.classList.add('visible');
+            else topToolbar.classList.remove('visible');
+
+            if (y > 0.84) bottomToolbar.classList.add('visible');
+            else bottomToolbar.classList.remove('visible');
+        }
+
+        // اختيار إيموجي من القائمة الدائرية
+        function selectEmoji(emoji) {
+            selectedEmoji = emoji;
+            activeEmojiText.innerText = emoji;
+            triggerHUD(`تم تحديد ${emoji}`, '#00f3ff');
+            // إغلاق تلقائي للقائمة بعد الاختيار
+            isEmojiMenuOpen = false;
+            emojiPopup.classList.remove('active');
+        }
+
+        // دالة التقاط شاشة ذكية تدمج بث الكاميرا مع الرسم
+        function captureScene() {
+            // تفعيل فلاش بؤري أبيض ناصع
+            flashOverlay.style.opacity = '1';
+            setTimeout(() => { flashOverlay.style.opacity = '0'; }, 150);
+
+            const tempCanvas = document.createElement('canvas');
+            tempCanvas.width = canvasElement.width;
+            tempCanvas.height = canvasElement.height;
+            const tempCtx = tempCanvas.getContext('2d');
+
+            // 1. رسم المشهد الملتقط من الكاميرا باتجاه صحيح غير معكوس
+            tempCtx.translate(tempCanvas.width, 0);
+            tempCtx.scale(-1, 1);
+            tempCtx.drawImage(videoElement, 0, 0, tempCanvas.width, tempCanvas.height);
+            tempCtx.setTransform(1, 0, 0, 1, 0, 0); 
+
+            // 2. دمج طبقة الرسم فوق الخلفية
+            tempCtx.drawImage(canvasElement, 0, 0);
+
+            // 3. تصدير اللقطة وتحميلها تلقائياً
+            const link = document.createElement('a');
+            link.download = `GlassArt-Capture-${Date.now()}.png`;
+            link.href = tempCanvas.toDataURL('image/png');
+            link.click();
+            
+            triggerHUD("تم حفظ اللقطة 📸", "#ff007f", 1.4);
+        }
+
+        function onResults(results) {
+            if (!results.multiHandLandmarks || results.multiHandLandmarks.length === 0) {
+                isDrawing = false;
+                return;
+            }
+
+            const landmarks = results.multiHandLandmarks[0];
+            const indexTip = landmarks[8];
+            
+            // حساب الإحداثيات المتوافقة مع الشاشة (مع تصحيح المرآة لعمليات التتبع)
+            const rawX = indexTip.x;
+            const screenX = rawX * canvasElement.width;
+            const screenY = indexTip.y * canvasElement.height;
+
+            const clientX = (1 - rawX) * window.innerWidth;
+            const clientY = indexTip.y * window.innerHeight;
+
+            hudRing.style.left = `${clientX}px`;
+            hudRing.style.top = `${clientY}px`;
+
+            // تحديث موقع نافذة الإيموجي الطافية لتتبع حركة اليد عند فتحها
+            if (isEmojiMenuOpen) {
+                emojiPopup.style.left = `${clientX - 110}px`;
+                emojiPopup.style.top = `${clientY - 140}px`;
+            }
+
+            updateToolbarVisibility(indexTip.y);
+
+            // فك ترميز حركات الأصابع
+            const thumbUp = Math.abs(landmarks[4].x - landmarks[5].x) > 0.04;
+            const indexUp = landmarks[8].y < landmarks[6].y;
+            const middleUp = landmarks[12].y < landmarks[10].y;
+            const ringUp = landmarks[16].y < landmarks[14].y;
+            const pinkyUp = landmarks[20].y < landmarks[18].y;
+
+            // حساب المسافة الأفقية بين أطراف الأصابع لتحديد درجة انفراج اليد
+            const fingersSpread = Math.abs(landmarks[8].x - landmarks[20].x) > 0.13;
+
+            // -------------------------------------------------------------
+            // ميزة 1: إيماءة الفلاش المزدوج للكف المفتوح (Double Open Hand Flash)
+            // -------------------------------------------------------------
+            const isHandFullyOpenNow = indexUp && middleUp && ringUp && pinkyUp && fingersSpread && thumbUp;
+            
+            if (isHandFullyOpenNow) {
+                if (!wasHandFullyOpen) {
+                    const currentTime = Date.now();
+                    const timeDifference = currentTime - lastFlashTime;
+
+                    if (timeDifference < 1200 && timeDifference > 200) {
+                        flashCounter++;
+                        if (flashCounter >= 2) {
+                            captureScene();
+                            flashCounter = 0;
+                        }
+                    } else {
+                        flashCounter = 1;
+                    }
+                    lastFlashTime = currentTime;
+                    wasHandFullyOpen = true;
+                }
+            } else {
+                // استعادة حالة اليد المضمومة تدريجياً لانتظار النبضة التالية
+                if (!indexUp && !middleUp && !ringUp && !pinkyUp) {
+                    wasHandFullyOpen = false;
+                }
+            }
+
+            // -------------------------------------------------------------
+            // ميزة 2: إيماءة القلب (🫰) لفتح القائمة المنبثقة للإيموجي
+            // -------------------------------------------------------------
+            const distThumbIndex = Math.hypot(landmarks[4].x - landmarks[8].x, landmarks[4].y - landmarks[8].y);
+            const isHeartGesture = distThumbIndex < 0.035 && !middleUp && !ringUp && !pinkyUp;
+
+            if (isHeartGesture && !heartGestureCooldown) {
+                heartGestureCooldown = true;
+                isEmojiMenuOpen = !isEmojiMenuOpen;
+                if (isEmojiMenuOpen) {
+                    emojiPopup.classList.add('active');
+                    triggerHUD("قائمة الرموز 🫰", "#ff007f");
+                } else {
+                    emojiPopup.classList.remove('active');
+                    triggerHUD("إغلاق القائمة", "#ffffff");
+                }
+                
+                // تبريد الإيماءة لتجنب التكرار غير المرغوب
+                setTimeout(() => { heartGestureCooldown = false; }, 1500);
+            }
+
+            // -------------------------------------------------------------
+            // ميزة 3: إيماءة تصغير وتكبير الفرشاة (قبضة اليد ✊ أو فتح الكف 🖐)
+            // -------------------------------------------------------------
+            if (!indexUp && !middleUp && !ringUp && !pinkyUp) {
+                // قبضة مغلقة ✊
+                if (brushSize > 4) {
+                    brushSize -= 0.6;
+                    brushSizeText.innerText = `${Math.round(brushSize)}px`;
+                    triggerHUD("تصغير", "#ffffff", 0.85);
+                }
+            } else if (indexUp && middleUp && ringUp && pinkyUp && fingersSpread && !isEmojiMenuOpen) {
+                // الكف مفتوح ومنفرج 🖐
+                if (brushSize < 60) {
+                    brushSize += 0.6;
+                    brushSizeText.innerText = `${Math.round(brushSize)}px`;
+                    triggerHUD("تكبير", "#ffffff", 1.3);
+                }
+            }
+
+            // -------------------------------------------------------------
+            // ميزة 4: تفعيل الممحاة والمسح الشامل عبر الاهتزاز السريع
+            // -------------------------------------------------------------
+            const isEraserMode = indexUp && middleUp && ringUp && pinkyUp && !fingersSpread;
+
+            if (isEraserMode) {
+                activeModeText.innerText = "ممحاة";
+                
+                // حساب الاهتزاز السريع
+                xHistory.push(indexTip.x);
+                if (xHistory.length > 15) xHistory.shift();
+                let velocity = 0;
+                for (let i = 1; i < xHistory.length; i++) {
+                    velocity += Math.abs(xHistory[i] - xHistory[i-1]);
+                }
+
+                if (velocity > shakeThreshold) {
+                    canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
+                    triggerHUD("مسح اللوحة بالكامل ✨", "#ff0000", 1.4);
+                } else {
+                    canvasCtx.globalCompositeOperation = 'destination-out';
+                    canvasCtx.beginPath();
+                    canvasCtx.arc(screenX, screenY, brushSize * 2.5, 0, Math.PI * 2);
+                    canvasCtx.fill();
+                    triggerHUD("ممحاة", "#ffffff", 1.0);
+                }
+                isDrawing = false;
+                return;
+            }
+
+            // إعادة ضبط وضع دمج الألوان للوضع الافتراضي
+            canvasCtx.globalCompositeOperation = 'source-over';
+
+            // -------------------------------------------------------------
+            // ميزة 5: تغيير الألوان ديناميكياً برفع الأصابع الخلفية
+            // -------------------------------------------------------------
+            if (!indexUp && !middleUp && !ringUp && pinkyUp) {
+                // خنصر فقط
+                brushColor = '#00f3ff';
+                activeColorDot.style.color = brushColor;
+                activeColorDot.style.backgroundColor = brushColor;
+                triggerHUD("سماوي", brushColor);
+            } 
+            else if (!indexUp && !middleUp && ringUp && pinkyUp) {
+                // خنصر وبنصر
+                brushColor = '#ff007f';
+                activeColorDot.style.color = brushColor;
+                activeColorDot.style.backgroundColor = brushColor;
+                triggerHUD("وردي", brushColor);
+            } 
+            else if (!indexUp && middleUp && ringUp && pinkyUp) {
+                // خنصر وبنصر ووسطى
+                brushColor = '#ffeb3b';
+                activeColorDot.style.color = brushColor;
+                activeColorDot.style.backgroundColor = brushColor;
+                triggerHUD("أصفر", brushColor);
+            }
+
+            // -------------------------------------------------------------
+            // ميزة 6: الكتابة العادية أو طباعة الإيموجي عند إيماءة القلم ✍
+            // -------------------------------------------------------------
+            const isWritingGrip = indexUp && !middleUp && !ringUp && !pinkyUp;
+
+            if (isWritingGrip) {
+                if (selectedEmoji !== '') {
+                    // إذا كان هناك إيموجي محدد، يتم طبعه مرة واحدة على اللوحة عند توجيه المؤشر
+                    canvasCtx.save();
+                    canvasCtx.translate(screenX, screenY);
+                    canvasCtx.scale(-1, 1); // تصحيح اتجاه الإيموجي بسبب مرآة الكرتونة
+                    canvasCtx.font = `${brushSize * 3}px 'Cairo'`;
+                    canvasCtx.textAlign = 'center';
+                    canvasCtx.textBaseline = 'middle';
+                    canvasCtx.fillText(selectedEmoji, 0, 0);
+                    canvasCtx.restore();
+                    
+                    // إعادة تعيين الإيموجي لمنع التكرار اللانهائي في الإطار التالي
+                    selectedEmoji = '';
+                    activeEmojiText.innerText = "لاشيء";
+                    triggerHUD("تم اللصق", "#00f3ff");
+                } else {
+                    // نمط الرسم بالخط التقليدي
+                    activeModeText.innerText = "رسم";
+                    canvasCtx.strokeStyle = brushColor;
+                    canvasCtx.lineWidth = brushSize;
+                    canvasCtx.lineCap = 'round';
+                    canvasCtx.lineJoin = 'round';
+
+                    if (!isDrawing) {
+                        canvasCtx.beginPath();
+                        canvasCtx.moveTo(screenX, screenY);
+                        isDrawing = true;
+                    } else {
+                        canvasCtx.lineTo(screenX, screenY);
+                        canvasCtx.stroke();
+                    }
+                }
+            } else {
+                isDrawing = false;
+                if (activeModeText.innerText === "رسم") {
+                    activeModeText.innerText = "انتظار";
+                }
+            }
+        }
+
+        // تشغيل نظام MediaPipe Hands
+        const hands = new Hands({
+            locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`
+        });
+
+        hands.setOptions({
+            maxNumHands: 1,
+            modelComplexity: 1,
+            minDetectionConfidence: 0.8,
+            minTrackingConfidence: 0.8
+        });
+
+        hands.onResults(onResults);
+
+        const camera = new Camera(videoElement, {
+            onFrame: async () => {
+                await hands.send({ image: videoElement });
+            },
+            width: 1280,
+            height: 720
+        });
+        camera.start();
+    </script>
+</body>
+</html>
